@@ -4,6 +4,6 @@ import "refacto/internal/domain/ast/root"
 
 type (
 	AST struct {
-		Root *root.Root
+		Root root.Root
 	}
 )

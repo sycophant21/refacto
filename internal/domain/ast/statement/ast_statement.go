@@ -6,6 +6,22 @@ type (
 		GetStatementType() StatementType
 	}
 	StatementType int
+	AssignOpKind  int
+)
+
+const (
+	AssignOpUnknown AssignOpKind = iota
+	AssignOpEq
+	AssignOpAdd
+	AssignOpSub
+	AssignOpMul
+	AssignOpDiv
+	AssignOpMod
+	AssignOpAnd
+	AssignOpOr
+	AssignOpXor
+	AssignOpShiftLeft
+	AssignOpShiftRight
 )
 
 const (
@@ -21,6 +37,7 @@ const (
 	StatementTypeDoWhile
 	StatementTypeSwitch
 	StatementTypeCase
+	StatementTypeSelect
 	StatementTypeDefault
 	StatementTypeBreak
 	StatementTypeContinue
@@ -35,4 +52,10 @@ const (
 	StatementTypeImport
 	StatementTypeYield
 	StatementTypeAwait
+	StatementTypeForHeader
+	// Appended statement kinds for Go-specific control-flow extensions.
+	StatementTypeFallthrough
+	StatementTypeGo
 )
+
+// --- JSON marshaling for statement enums: serialize as strings ---
