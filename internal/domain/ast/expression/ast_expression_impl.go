@@ -17,7 +17,10 @@ type (
 		Binding  *SymbolBinding     `json:"Binding,omitempty"`
 	}
 	IntegerLiteral struct {
-		Value int64
+		// Value holds the numeric value of the literal.
+		Value int64 `json:"Value"`
+		// Raw preserves the original source text (e.g. "0xFF", "0b1010").
+		Raw string `json:"Raw,omitempty"`
 	}
 	StringLiteral struct {
 		Value string
@@ -55,7 +58,14 @@ func (i *Identifier) GetContents() string               { return i.Value }
 
 // IntegerLiteral
 func (i *IntegerLiteral) GetExpressionType() ExpressionType { return ExpressionTypeIntegerLiteral }
-func (i *IntegerLiteral) GetContents() string               { return fmt.Sprintf("%d", i.Value) }
+func (i *IntegerLiteral) GetContents() string {
+	// Prefer the original textual representation when available so we
+	// preserve base (0x, 0b, etc.) when reconstructing source.
+	if i.Raw != "" {
+		return i.Raw
+	}
+	return fmt.Sprintf("%d", i.Value)
+}
 
 // StringLiteral
 func (s *StringLiteral) GetExpressionType() ExpressionType { return ExpressionTypeStringLiteral }

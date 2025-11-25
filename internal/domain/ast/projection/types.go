@@ -260,6 +260,21 @@ func parseTypeString(s string) (*declaration.TypeReference, error) {
 		return &declaration.TypeReference{Kind: declaration.Primitive, PrimitiveKind: declaration.Bool}, nil
 	case "char", "rune":
 		return &declaration.TypeReference{Kind: declaration.Primitive, PrimitiveKind: declaration.Char}, nil
+	case "uint", "uint8", "uint16", "uint32", "uint64", "byte", "uintptr":
+		tr := &declaration.TypeReference{Kind: declaration.Primitive, PrimitiveKind: declaration.UnsignedInteger}
+		memBits := map[string]any{
+			"uint":    "system_default",
+			"uint8":   8,
+			"byte":    8,
+			"uint16":  16,
+			"uint32":  32,
+			"uint64":  64,
+			"uintptr": "pointer_size",
+		}
+		if v, ok := memBits[s]; ok {
+			tr.AdditionalProperties = map[string]any{"memory_bits": v}
+		}
+		return tr, nil
 	}
 
 	// Otherwise, treat as a user-defined type; resolution to an actual

@@ -335,8 +335,8 @@ func (p *Parser) parseFunctionName(funcDecl *declaration.FunctionDeclaration, re
 }
 
 // parseFunctionParameters parses the function parameter list and appends
-// parameters to funcDecl. It assumes the current token is at the opening '('
-// or already past it.
+// parameters to funcDecl. It supports grouped parameters like `x, y uint` and
+// assumes the current token is at the opening '(' or already past it.
 func (p *Parser) parseFunctionParameters(funcDecl *declaration.FunctionDeclaration) {
 	if !p.curTokenIs("(") {
 		return
@@ -345,20 +345,46 @@ func (p *Parser) parseFunctionParameters(funcDecl *declaration.FunctionDeclarati
 	p.nextToken() // skip '('
 	for !p.curTokenIs(")") && !p.curTokenIs("EOF") {
 		if p.curToken.SubCategory() == GoLexTokenSubCategory(IDENT) {
-			paramName := p.curToken.Value()
-			p.nextToken()
-
-			paramType := p.parseParameterType()
-			param := &declaration.FunctionParameter{
-				Name:          paramName,
-				ParameterType: p.determineTypeReference(paramType, funcDecl.Id+":param:"+paramName),
+			// Collect one or more parameter names: x, y, z
+			var names []string
+			for {
+				if p.curToken.SubCategory() != GoLexTokenSubCategory(IDENT) {
+					break
+				}
+				names = append(names, p.curToken.Value())
+				p.nextToken()
+				if !p.curTokenIs(",") {
+					break
+				}
+				// Consume comma and prepare for next name or type
+				p.nextToken()
+				// If the next token starts a type (e.g. "[]", "chan", "map", "..."),
+				// stop collecting names.
+				if p.curTokenIs("[") || p.curTokenIs("chan") || p.curTokenIs("map") ||
+					p.curTokenIs("...") || p.curTokenIs("interface") {
+					break
+				}
+				if p.curToken.SubCategory() != GoLexTokenSubCategory(IDENT) {
+					break
+				}
 			}
-			funcDecl.Parameters = append(funcDecl.Parameters, param)
+
+			// Current token should now be at the beginning of the type.
+			paramType := p.parseParameterType()
+
+			for _, name := range names {
+				param := &declaration.FunctionParameter{
+					Name:          name,
+					ParameterType: p.determineTypeReference(paramType, funcDecl.Id+":param:"+name),
+				}
+				funcDecl.Parameters = append(funcDecl.Parameters, param)
+			}
 
 			if p.curTokenIs(",") {
 				p.nextToken()
 			}
 		} else {
+			// Skip unexpected tokens to avoid infinite loops.
 			p.nextToken()
 		}
 	}
@@ -458,6 +484,22 @@ func (p *Parser) parseStatement() statement.Statement {
 		return p.parseIfStatement()
 	case "for":
 		return p.parseForStatement()
+	case "switch":
+		return p.parseSwitchStatement()
+	case "select":
+		return p.parseSelectStatement()
+	case "break":
+		return p.parseBreakStatement()
+	case "continue":
+		return p.parseContinueStatement()
+	case "defer":
+		return p.parseDeferStatement()
+	case "goto":
+		return p.parseGotoStatement()
+	case "fallthrough":
+		return p.parseFallthroughStatement()
+	case "go":
+		return p.parseGoStatement()
 	case "var":
 		return p.parseVariableDeclarationStatement()
 	default:
@@ -888,4 +930,234 @@ func (p *Parser) parseClauseFor(stmt *statement.ForStatement) {
 		// IMPORTANT: Leave cursor at '}' (do NOT call nextToken)
 		// This allows outer parseBlockStatements to see the '}' in its loop condition
 	}
+}
+
+// --- Additional control-flow statement parsers ---
+
+// parseBreakStatement parses a bare `break` statement. Labelled breaks are
+// currently parsed as bare breaks; label information can be added later if
+// needed.
+func (p *Parser) parseBreakStatement() *statement.BreakStatement {
+	return &statement.BreakStatement{}
+}
+
+// parseContinueStatement parses a `continue` statement.
+func (p *Parser) parseContinueStatement() *statement.ContinueStatement {
+	return &statement.ContinueStatement{}
+}
+
+// parseFallthroughStatement parses a `fallthrough` statement inside a switch
+// case. It has no payload, but is modeled as a distinct node in the AST.
+func (p *Parser) parseFallthroughStatement() *statement.FallthroughStatement {
+	return &statement.FallthroughStatement{}
+}
+
+// parseDeferStatement parses a `defer <call>` statement. It treats the
+// following expression as the deferred call. We rely on parseBlockStatements
+// to consume any trailing semicolon token.
+func (p *Parser) parseDeferStatement() *statement.DeferStatement {
+	stmt := &statement.DeferStatement{}
+	// curToken is 'defer'
+	p.nextToken() // move to start of deferred expression
+	if !p.curTokenIs(";") && !p.curTokenIs("}") && !p.curTokenIs("EOF") {
+		stmt.Call = p.parseExpression(LOWEST)
+	}
+	return stmt
+}
+
+// parseGotoStatement parses a `goto label` statement. The label is stored as a
+// simple string on the GotoStatement node.
+func (p *Parser) parseGotoStatement() *statement.GotoStatement {
+	stmt := &statement.GotoStatement{}
+	// curToken is 'goto'
+	if p.peekToken.SubCategory() == GoLexTokenSubCategory(IDENT) {
+		p.nextToken()
+		stmt.Label = p.curToken.Value()
+	}
+	return stmt
+}
+
+// parseGoStatement parses a `go <call>` statement, representing a goroutine
+// launch. The launched expression is stored in the GoStatement.Call field.
+func (p *Parser) parseGoStatement() *statement.GoStatement {
+	stmt := &statement.GoStatement{}
+	// curToken is 'go'
+	p.nextToken() // move to start of call expression
+	if !p.curTokenIs(";") && !p.curTokenIs("}") && !p.curTokenIs("EOF") {
+		stmt.Call = p.parseExpression(LOWEST)
+	}
+	return stmt
+}
+
+// parseSwitchStatement parses Go "switch" statements in a simplified but
+// robust way. It supports expression switches and type switches by capturing
+// the header expression best-effort and then parsing cases.
+func (p *Parser) parseSwitchStatement() *statement.SwitchStatement {
+	stmt := &statement.SwitchStatement{}
+	// curToken is 'switch'
+	p.nextToken() // move to first token after 'switch'
+
+	// Header: best-effort parse of the switch expression; skip any trailing
+	// tokens until the opening '{'. This handles both "switch x {" and more
+	// complex headers like "switch v := x.(type) {".
+	if p.curTokenIs("{") {
+		// Expression-less switch
+		// leave stmt.Expression nil
+	} else {
+		expr := p.parseExpression(LOWEST)
+		if expr != nil {
+			stmt.Expression = expr
+		}
+		// Advance until '{' or EOF
+		for !p.curTokenIs("{") && !p.curTokenIs("EOF") {
+			p.nextToken()
+		}
+	}
+
+	if !p.curTokenIs("{") {
+		return stmt
+	}
+
+	// Enter switch body
+	p.nextToken() // skip '{'
+	for !p.curTokenIs("}") && !p.curTokenIs("EOF") {
+		if p.curTokenIs("case") || p.curTokenIs("default") {
+			cs := p.parseSwitchCase()
+			if cs != nil {
+				stmt.Cases = append(stmt.Cases, cs)
+			}
+			continue
+		}
+		// Skip unexpected tokens between cases.
+		p.nextToken()
+	}
+
+	return stmt
+}
+
+// parseSwitchCase parses a single `case` or `default` clause inside a switch.
+// It assumes curToken is either "case" or "default" when called.
+func (p *Parser) parseSwitchCase() *statement.SwitchCaseStatement {
+	cs := &statement.SwitchCaseStatement{}
+
+	if p.curTokenIs("case") {
+		// Parse comma-separated expressions until ':'
+		p.nextToken() // move to first expression token
+		for {
+			if p.curTokenIs(":") || p.curTokenIs("EOF") {
+				break
+			}
+			expr := p.parseExpression(LOWEST)
+			if expr != nil {
+				cs.Expressions = append(cs.Expressions, expr)
+			}
+			// After parseExpression, curToken is the last token of the expression.
+			if p.peekTokenIs(",") {
+				p.nextToken() // move to ','
+				p.nextToken() // move to start of next expression
+				continue
+			}
+			if p.peekTokenIs(":") {
+				p.nextToken() // move to ':'
+				break
+			}
+			// Fallback: advance one token to make progress.
+			p.nextToken()
+		}
+	} else if p.curTokenIs("default") {
+		// default clause has no expressions; skip tokens until ':'
+		for !p.curTokenIs(":") && !p.curTokenIs("EOF") {
+			p.nextToken()
+		}
+	}
+
+	// At this point, curToken should be ':' (or EOF). Move to first body token.
+	if p.curTokenIs(":") {
+		p.nextToken()
+	}
+
+	// Parse case body statements until the next case/default or closing brace.
+	for !p.curTokenIs("case") && !p.curTokenIs("default") && !p.curTokenIs("}") && !p.curTokenIs("EOF") {
+		stmt := p.parseStatement()
+		if stmt != nil {
+			cs.Body = append(cs.Body, stmt)
+		}
+		p.nextToken()
+	}
+
+	return cs
+}
+
+// parseSelectStatement parses Go `select` statements. Channel case headers are
+// currently captured as raw header strings in a single Identifier expression
+// for simplicity.
+func (p *Parser) parseSelectStatement() *statement.SelectStatement {
+	stmt := &statement.SelectStatement{}
+	// curToken is 'select'
+	p.nextToken() // move to '{' or whitespace
+
+	// Skip to opening '{'
+	for !p.curTokenIs("{") && !p.curTokenIs("EOF") {
+		p.nextToken()
+	}
+	if !p.curTokenIs("{") {
+		return stmt
+	}
+
+	p.nextToken() // skip '{'
+	for !p.curTokenIs("}") && !p.curTokenIs("EOF") {
+		if p.curTokenIs("case") || p.curTokenIs("default") {
+			cs := p.parseSelectCase()
+			if cs != nil {
+				stmt.Cases = append(stmt.Cases, cs)
+			}
+			continue
+		}
+		p.nextToken()
+	}
+	return stmt
+}
+
+// parseSelectCase parses a single `case` or `default` inside a select. For
+// `case` clauses, we capture the entire header between `case` and `:` as a
+// single Identifier.Value string; this keeps the representation simple while
+// still giving the LLM enough surface form.
+func (p *Parser) parseSelectCase() *statement.SelectCaseStatement {
+	cs := &statement.SelectCaseStatement{}
+
+	if p.curTokenIs("case") {
+		// Collect all tokens until ':' into a single header string.
+		p.nextToken() // move to first header token
+		var parts []string
+		for !p.curTokenIs(":") && !p.curTokenIs("EOF") {
+			parts = append(parts, p.curToken.Value())
+			p.nextToken()
+		}
+		if len(parts) > 0 {
+			head := strings.Join(parts, " ")
+			cs.Expressions = []expression.Expression{
+				&expression.Identifier{Value: head},
+			}
+		}
+	} else if p.curTokenIs("default") {
+		// default select case – no header expressions
+		for !p.curTokenIs(":") && !p.curTokenIs("EOF") {
+			p.nextToken()
+		}
+	}
+
+	// Move past ':' to first body token
+	if p.curTokenIs(":") {
+		p.nextToken()
+	}
+
+	for !p.curTokenIs("case") && !p.curTokenIs("default") && !p.curTokenIs("}") && !p.curTokenIs("EOF") {
+		stmt := p.parseStatement()
+		if stmt != nil {
+			cs.Body = append(cs.Body, stmt)
+		}
+		p.nextToken()
+	}
+
+	return cs
 }

@@ -97,10 +97,18 @@ type (
 	ContinueStatement struct {
 		Body expression.Expression
 	}
-	BlockStatement struct {
+	// FallthroughStatement models a `fallthrough` control-flow transfer inside
+	// a switch case. It does not carry additional payload today but is kept as
+	// a distinct node for language-agnostic analysis.
+	FallthroughStatement struct{}
+	BlockStatement       struct {
 		Body []Statement
 	}
 	DeferStatement struct {
+		Call expression.Expression
+	}
+	// GoStatement models a `go` statement launching a concurrent call.
+	GoStatement struct {
 		Call expression.Expression
 	}
 	TryStatement struct {
@@ -234,6 +242,10 @@ func (t StatementType) MarshalJSON() ([]byte, error) {
 		s = "Await"
 	case StatementTypeForHeader:
 		s = "ForHeader"
+	case StatementTypeFallthrough:
+		s = "Fallthrough"
+	case StatementTypeGo:
+		s = "Go"
 	default:
 		s = "Unknown"
 	}
@@ -485,6 +497,10 @@ func (s *BreakStatement) GetContents() string             { return "break" }
 func (s *ContinueStatement) GetStatementType() StatementType { return StatementTypeContinue }
 func (s *ContinueStatement) GetContents() string             { return "continue" }
 
+// FallthroughStatement
+func (s *FallthroughStatement) GetStatementType() StatementType { return StatementTypeFallthrough }
+func (s *FallthroughStatement) GetContents() string             { return "fallthrough" }
+
 // BlockStatement
 func (s *BlockStatement) GetStatementType() StatementType { return StatementTypeBlock }
 func (s *BlockStatement) GetContents() string             { return reconstructBody(s.Body) }
@@ -493,6 +509,15 @@ func (s *BlockStatement) GetContents() string             { return reconstructBo
 func (s *DeferStatement) GetStatementType() StatementType { return StatementTypeDefer }
 func (s *DeferStatement) GetContents() string {
 	return fmt.Sprintf("defer %s", s.Call.GetContents())
+}
+
+// GoStatement
+func (s *GoStatement) GetStatementType() StatementType { return StatementTypeGo }
+func (s *GoStatement) GetContents() string {
+	if s.Call == nil {
+		return "go"
+	}
+	return fmt.Sprintf("go %s", s.Call.GetContents())
 }
 
 // TryStatement

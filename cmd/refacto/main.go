@@ -37,7 +37,7 @@ func main() {
 	if len(args) > 0 {
 		filePath = args[0]
 	} else {
-		filePath = "cmd/refacto/test_data/complex_test.go"
+		filePath = "cmd/refacto/test_data/bitwise_test.go"
 	}
 
 	// Use the parser registry to obtain the Go parser.

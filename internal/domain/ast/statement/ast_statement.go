@@ -53,6 +53,9 @@ const (
 	StatementTypeYield
 	StatementTypeAwait
 	StatementTypeForHeader
+	// Appended statement kinds for Go-specific control-flow extensions.
+	StatementTypeFallthrough
+	StatementTypeGo
 )
 
 // --- JSON marshaling for statement enums: serialize as strings ---

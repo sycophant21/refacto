@@ -127,6 +127,12 @@ func ProjectStatement(s statement.Statement) (map[string]any, error) {
 		return projectContinueStatement(v)
 	case *statement.DeferStatement:
 		return projectDeferStatement(v)
+	case *statement.GotoStatement:
+		return projectGotoStatement(v)
+	case *statement.FallthroughStatement:
+		return projectFallthroughStatement(v)
+	case *statement.GoStatement:
+		return projectGoStatement(v)
 	default:
 		return nil, fmt.Errorf("ProjectStatement not implemented for %T", s)
 	}
@@ -457,6 +463,33 @@ func projectDeferStatement(v *statement.DeferStatement) (map[string]any, error) 
 	return m, nil
 }
 
+func projectGotoStatement(v *statement.GotoStatement) (map[string]any, error) {
+	// { "node": "goto", "label": "L1" }
+	m := map[string]any{"node": "goto"}
+	if v.Label != "" {
+		m["label"] = v.Label
+	}
+	return m, nil
+}
+
+func projectFallthroughStatement(_ *statement.FallthroughStatement) (map[string]any, error) {
+	// { "node": "fallthrough" }
+	return map[string]any{"node": "fallthrough"}, nil
+}
+
+func projectGoStatement(v *statement.GoStatement) (map[string]any, error) {
+	// { "node": "go", "call": <expr> }
+	call, err := ProjectExpression(v.Call)
+	if err != nil {
+		return nil, err
+	}
+	m := map[string]any{"node": "go"}
+	if call != nil {
+		m["call"] = call
+	}
+	return m, nil
+}
+
 // ParseStatement reconstructs an internal statement node from a generic
 // LLM-friendly map representation.
 func ParseStatement(m map[string]any) (statement.Statement, error) {
@@ -498,6 +531,12 @@ func ParseStatement(m map[string]any) (statement.Statement, error) {
 		return &statement.ContinueStatement{}, nil
 	case "defer":
 		return parseDeferStatement(m)
+	case "goto":
+		return parseGotoStatement(m)
+	case "fallthrough":
+		return &statement.FallthroughStatement{}, nil
+	case "go":
+		return parseGoStatement(m)
 	default:
 		return nil, fmt.Errorf("ParseStatement: unsupported node %q", node)
 	}
@@ -788,4 +827,21 @@ func parseDeferStatement(m map[string]any) (statement.Statement, error) {
 		return nil, err
 	}
 	return &statement.DeferStatement{Call: callExpr}, nil
+}
+
+func parseGotoStatement(m map[string]any) (statement.Statement, error) {
+	label, _ := stringFromAny(m["label"])
+	return &statement.GotoStatement{Label: label}, nil
+}
+
+func parseGoStatement(m map[string]any) (statement.Statement, error) {
+	rawCall, ok := m["call"].(map[string]any)
+	if !ok || rawCall == nil {
+		return &statement.GoStatement{}, nil
+	}
+	callExpr, err := ParseExpression(rawCall)
+	if err != nil {
+		return nil, err
+	}
+	return &statement.GoStatement{Call: callExpr}, nil
 }

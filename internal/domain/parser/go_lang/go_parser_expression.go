@@ -33,8 +33,14 @@ func (p *Parser) parseIdentifier() expression.Expression {
 }
 
 func (p *Parser) parseIntegerLiteral() expression.Expression {
-	val, _ := strconv.Atoi(p.curToken.Value())
-	return &expression.IntegerLiteral{Value: int64(val)}
+	// Use ParseInt with base 0 to support 0x, 0b, 0o, and decimal literals.
+	lit := p.curToken.Value()
+	v, err := strconv.ParseInt(lit, 0, 64)
+	if err != nil {
+		// Fallback: treat as 0 but keep parsing moving forward.
+		v = 0
+	}
+	return &expression.IntegerLiteral{Value: v, Raw: lit}
 }
 
 func (p *Parser) parseStringLiteral() expression.Expression {

@@ -19,8 +19,8 @@ func (p *Parser) parseParameterType() string {
 		p.nextToken()
 	}
 
-	// If we only saw "..." and then a comma or ')', there's no type to parse
-	if !(paramType != "" || !(p.curTokenIs(",") || p.curTokenIs(")"))) {
+	// If we only saw "..." and then a comma or ')', there's no type to parse yet.
+	if paramType == "..." && (p.curTokenIs(",") || p.curTokenIs(")")) {
 		return paramType
 	}
 
@@ -37,7 +37,13 @@ func (p *Parser) parseParameterType() string {
 	case p.curToken.SubCategory() == GoLexTokenSubCategory(IDENT) ||
 		p.curToken.SubCategory() == GoLexTokenSubCategory(INT_KEYWORD) ||
 		p.curToken.SubCategory() == GoLexTokenSubCategory(STRING_KEYWORD) ||
-		p.curToken.SubCategory() == GoLexTokenSubCategory(BOOL_KEYWORD):
+		p.curToken.SubCategory() == GoLexTokenSubCategory(BOOL_KEYWORD) ||
+		p.curToken.SubCategory() == GoLexTokenSubCategory(UNSIGNED_INT_KEYWORD) ||
+		p.curToken.SubCategory() == GoLexTokenSubCategory(UNSIGNED_INT_8_BIT_KEYWORD) ||
+		p.curToken.SubCategory() == GoLexTokenSubCategory(UNSIGNED_INT_16_BIT_KEYWORD) ||
+		p.curToken.SubCategory() == GoLexTokenSubCategory(UNSIGNED_INT_32_BIT_KEYWORD) ||
+		p.curToken.SubCategory() == GoLexTokenSubCategory(UNSIGNED_INT_64_BIT_KEYWORD) ||
+		p.curToken.SubCategory() == GoLexTokenSubCategory(UNSIGNED_POINTER_KEYWORD):
 		paramType = p.parseParamSimpleOrVariadicType(paramType)
 	}
 
@@ -302,7 +308,13 @@ func (p *Parser) parseSingleReturnType(funcDecl *declaration.FunctionDeclaration
 	} else if p.curToken.SubCategory() == GoLexTokenSubCategory(IDENT) ||
 		p.curToken.SubCategory() == GoLexTokenSubCategory(INT_KEYWORD) ||
 		p.curToken.SubCategory() == GoLexTokenSubCategory(STRING_KEYWORD) ||
-		p.curToken.SubCategory() == GoLexTokenSubCategory(BOOL_KEYWORD) {
+		p.curToken.SubCategory() == GoLexTokenSubCategory(BOOL_KEYWORD) ||
+		p.curToken.SubCategory() == GoLexTokenSubCategory(UNSIGNED_INT_KEYWORD) ||
+		p.curToken.SubCategory() == GoLexTokenSubCategory(UNSIGNED_INT_8_BIT_KEYWORD) ||
+		p.curToken.SubCategory() == GoLexTokenSubCategory(UNSIGNED_INT_16_BIT_KEYWORD) ||
+		p.curToken.SubCategory() == GoLexTokenSubCategory(UNSIGNED_INT_32_BIT_KEYWORD) ||
+		p.curToken.SubCategory() == GoLexTokenSubCategory(UNSIGNED_INT_64_BIT_KEYWORD) ||
+		p.curToken.SubCategory() == GoLexTokenSubCategory(UNSIGNED_POINTER_KEYWORD) {
 		returnType = p.curToken.Value()
 		p.nextToken()
 	}
@@ -706,20 +718,46 @@ func stripTypePrefixes(clean string) string {
 }
 
 // determinePrimitiveTypeReference returns a TypeReference for primitive types
-// like int, string, bool, etc.
+// like int, string, bool, etc. It preserves the original SystemType string
+// (e.g. "uint", "int64", "byte") so downstream consumers and projections
+// can distinguish between different primitive spellings.
 func determinePrimitiveTypeReference(cleanName string, isVariadic bool) *declaration.TypeReference {
 	switch cleanName {
 	case "int", "int8", "int16", "int32", "int64":
 		tr := &declaration.TypeReference{
 			Kind:          declaration.Primitive,
 			PrimitiveKind: declaration.Integer,
+			SystemType:    cleanName,
 		}
 		tr.IsVariadic = isVariadic
 		return tr
-	case "uint", "uint8", "uint16", "uint32", "uint64", "uintptr", "byte", "rune":
+	case "uint", "uint8", "uint16", "uint32", "uint64", "uintptr", "byte":
 		tr := &declaration.TypeReference{
 			Kind:          declaration.Primitive,
-			PrimitiveKind: declaration.Integer,
+			PrimitiveKind: declaration.UnsignedInteger,
+			SystemType:    cleanName,
+		}
+		// Attach bit-width metadata for unsigned integers in a language-agnostic
+		// way using an AdditionalProperties entry named "memory_bits".
+		memBits := map[string]any{
+			"uint":    "system_default",
+			"uint8":   8,
+			"byte":    8,
+			"uint16":  16,
+			"uint32":  32,
+			"uint64":  64,
+			"uintptr": "pointer_size",
+		}
+		if v, ok := memBits[cleanName]; ok {
+			tr.AdditionalProperties = map[string]any{"memory_bits": v}
+		}
+		tr.IsVariadic = isVariadic
+		return tr
+	case "rune":
+		tr := &declaration.TypeReference{
+			Kind:          declaration.Primitive,
+			PrimitiveKind: declaration.Char,
+			SystemType:    cleanName,
 		}
 		tr.IsVariadic = isVariadic
 		return tr
@@ -727,6 +765,7 @@ func determinePrimitiveTypeReference(cleanName string, isVariadic bool) *declara
 		tr := &declaration.TypeReference{
 			Kind:          declaration.Primitive,
 			PrimitiveKind: declaration.Float,
+			SystemType:    cleanName,
 		}
 		tr.IsVariadic = isVariadic
 		return tr
@@ -734,6 +773,7 @@ func determinePrimitiveTypeReference(cleanName string, isVariadic bool) *declara
 		tr := &declaration.TypeReference{
 			Kind:          declaration.Primitive,
 			PrimitiveKind: declaration.String,
+			SystemType:    cleanName,
 		}
 		tr.IsVariadic = isVariadic
 		return tr
@@ -741,6 +781,7 @@ func determinePrimitiveTypeReference(cleanName string, isVariadic bool) *declara
 		tr := &declaration.TypeReference{
 			Kind:          declaration.Primitive,
 			PrimitiveKind: declaration.Bool,
+			SystemType:    cleanName,
 		}
 		tr.IsVariadic = isVariadic
 		return tr

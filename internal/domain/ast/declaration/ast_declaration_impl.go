@@ -62,13 +62,23 @@ type (
 )
 
 const (
+	// Integer represents signed integer primitives (e.g. int, int32).
 	Integer FunctionParameterTypePrimitiveKind = iota
+	// Long represents wider signed integers (e.g. long, int64) for languages
+	// that distinguish them.
 	Long
+	// Float represents single-precision floating point values.
 	Float
+	// Double represents double-precision floating point values.
 	Double
+	// String represents text/string primitives.
 	String
+	// Bool represents boolean primitives.
 	Bool
+	// Char represents character/codepoint primitives (e.g. char, rune).
 	Char
+	// UnsignedInteger represents unsigned integer primitives (e.g. uint, uint32).
+	UnsignedInteger
 )
 
 const (
@@ -286,6 +296,8 @@ func (pk FunctionParameterTypePrimitiveKind) MarshalJSON() ([]byte, error) {
 		return json.Marshal("Bool")
 	case Char:
 		return json.Marshal("Char")
+	case UnsignedInteger:
+		return json.Marshal("UnsignedInteger")
 	default:
 		return json.Marshal("Unknown")
 	}
@@ -311,6 +323,8 @@ func (pk *FunctionParameterTypePrimitiveKind) UnmarshalJSON(b []byte) error {
 		*pk = Bool
 	case "Char":
 		*pk = Char
+	case "UnsignedInteger":
+		*pk = UnsignedInteger
 	}
 	return nil
 }

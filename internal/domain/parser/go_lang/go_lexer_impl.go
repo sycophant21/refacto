@@ -600,11 +600,43 @@ func (l *Lexer) readIdentifier() string {
 }
 
 func (l *Lexer) readNumber() string {
+	// Read an integer literal, including Go-style base prefixes and underscores.
+	// Examples: 123, 0xFF, 0b1010, 0o755.
 	position := l.position
+
+	// Always consume the leading digit(s).
 	for isDigit(l.ch) {
 		l.readChar()
 	}
+
+	// Allow base prefixes and hex/octal/binary digits as part of the same token.
+	for isNumberChar(l.ch) {
+		l.readChar()
+	}
+
 	return l.input[position:l.position]
+}
+
+// isNumberChar reports whether a rune can appear in a Go integer literal
+// after the initial digit run. We are permissive here and allow hexadecimal
+// letters and base designators; strconv.ParseInt with base 0 will validate.
+func isNumberChar(ch rune) bool {
+	// Allow digits, underscores, hex digits, and base-prefix letters inside
+	// a numeric literal after the initial digit run.
+	if isDigit(ch) || ch == '_' {
+		return true
+	}
+	if ch >= 'a' && ch <= 'f' {
+		return true
+	}
+	if ch >= 'A' && ch <= 'F' {
+		return true
+	}
+	// Base prefixes o, O (for 0o / 0O style octal) inside the literal.
+	if ch == 'o' || ch == 'O' {
+		return true
+	}
+	return false
 }
 
 func (l *Lexer) readString() *GoLexToken {
